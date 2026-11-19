@@ -1,0 +1,6 @@
+{
+  "name": "ProScan",
+  "description": "A 100% free & unlimited Google ML Kit + OpenCV document scanner, AI photo editor, universal file converter, offline 59-language translator & OCR, and personal Google Drive synced studio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,858 @@
+/*
+ * Copyright 2025-2026 The FairScan authors
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option)
+ * any later version.
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ * You should have received a copy of the GNU General Public License along with
+ * this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.fairscan.app.ui.screens.export
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.text.format.Formatter
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import kotlinx.collections.immutable.persistentListOf
+import org.fairscan.app.R
+import org.fairscan.app.THUMBNAIL_SIZE_DP
+import org.fairscan.app.domain.PdfCompression
+import org.fairscan.app.domain.PdfPageNumberStyle
+import org.fairscan.app.domain.PdfPageSize
+import org.fairscan.app.domain.StudioExportFormat
+import org.fairscan.app.ui.Navigation
+import org.fairscan.app.ui.components.AppOverflowMenu
+import org.fairscan.app.ui.components.BackButton
+import org.fairscan.app.ui.components.MainActionButton
+import org.fairscan.app.ui.components.NewDocumentDialog
+import org.fairscan.app.ui.components.isLandscape
+import org.fairscan.app.ui.components.pageCountText
+import org.fairscan.app.ui.dummyNavigation
+import org.fairscan.app.ui.fakeDocument
+import org.fairscan.app.ui.state.DocumentUiModel
+import org.fairscan.app.ui.theme.FairScanTheme
+import java.io.File
+
+@Composable
+fun ExportScreenWrapper(
+    navigation: Navigation,
+    uiState: ExportUiState,
+    currentDocument: DocumentUiModel,
+    exportActions: ExportActions,
+    onCloseScan: () -> Unit,
+    onExportSavedToLibrary: (filename: String, format: StudioExportFormat, isLocked: Boolean, path: String?) -> Unit = { _, _, _, _ -> },
+) {
+    BackHandler { navigation.back() }
+
+    val showConfirmationDialog = rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        exportActions.prepareExportIfNeeded()
+    }
+    LaunchedEffect(uiState.savedBundle, uiState.hasShared) {
+        if (uiState.savedBundle != null || uiState.hasShared) {
+            onExportSavedToLibrary(
+                uiState.filename,
+                uiState.format,
+                uiState.isPasswordProtected,
+                uiState.savedBundle?.items?.firstOrNull()?.uri?.toString()
+            )
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            exportActions.cancelPreparationJob()
+        }
+    }
+
+    ExportScreen(
+        uiState = uiState,
+        currentDocument = currentDocument,
+        navigation = navigation,
+        exportActions = exportActions,
+        onShare = { if (!uiState.isSaving) exportActions.share() },
+        onSave = { if (!uiState.isSaving) exportActions.save() },
+        onOpen = exportActions.open,
+        onCloseScan = {
+            if (!uiState.isSaving) {
+                if (uiState.hasSavedOrShared) onCloseScan()
+                else showConfirmationDialog.value = true
+            }
+        },
+    )
+
+    if (showConfirmationDialog.value) {
+        NewDocumentDialog(onCloseScan, showConfirmationDialog, stringResource(R.string.scan_new))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExportScreen(
+    uiState: ExportUiState,
+    currentDocument: DocumentUiModel,
+    navigation: Navigation,
+    exportActions: ExportActions,
+    onShare: () -> Unit,
+    onSave: () -> Unit,
+    onOpen: (SavedItem) -> Unit,
+    onCloseScan: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.export_as, uiState.format.label)) },
+                navigationIcon = { BackButton(navigation.back) },
+                actions = { AppOverflowMenu(navigation) }
+            )
+        }
+    ) { innerPadding ->
+        val containerModifier = Modifier
+            .padding(innerPadding)
+            .padding(horizontal = 16.dp)
+        val onThumbnailClick = navigation.toDocumentScreen
+
+        if (!isLandscape(LocalConfiguration.current)) {
+            Column(
+                modifier = containerModifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                PdfInfosAndResultBar(
+                    uiState = uiState,
+                    currentDocument = currentDocument,
+                    onOpen = onOpen,
+                    onThumbnailClick = onThumbnailClick,
+                    onSetupOcr = navigation.toOcrLanguagesScreen,
+                )
+                ExportOptionsCard(uiState, exportActions)
+                Spacer(Modifier.weight(1f, fill = false))
+                MainActions(exportActions.setFilename, uiState, onShare, onSave, onCloseScan)
+            }
+        } else {
+            Row(
+                modifier = containerModifier.fillMaxHeight(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    PdfInfosAndResultBar(
+                        uiState = uiState,
+                        currentDocument = currentDocument,
+                        onOpen = onOpen,
+                        onThumbnailClick = onThumbnailClick,
+                        onSetupOcr = navigation.toOcrLanguagesScreen,
+                    )
+                    ExportOptionsCard(uiState, exportActions)
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp)
+                ) {
+                    MainActions(exportActions.setFilename, uiState, onShare, onSave, onCloseScan)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportOptionsCard(
+    uiState: ExportUiState,
+    actions: ExportActions,
+) {
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    PdfInfoCard {
+        Text(
+            text = stringResource(R.string.export_format),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StudioExportFormat.entries.forEach { fmt ->
+                FilterChip(
+                    selected = uiState.format == fmt,
+                    onClick = { actions.setFormat(fmt) },
+                    label = { Text(fmt.label, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.testTag("export_format_${fmt.name.lowercase()}")
+                )
+            }
+        }
+
+        if (uiState.format == StudioExportFormat.PDF) {
+            Text(
+                text = stringResource(R.string.pdf_page_size),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PdfPageSize.entries.forEach { size ->
+                    FilterChip(
+                        selected = uiState.pageSize == size,
+                        onClick = { actions.setPageSize(size) },
+                        label = { Text(size.label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+
+            Text(
+                text = stringResource(R.string.pdf_compression),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PdfCompression.entries.forEach { comp ->
+                    FilterChip(
+                        selected = uiState.compression == comp,
+                        onClick = { actions.setCompression(comp) },
+                        label = { Text(comp.label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = uiState.passwordInput,
+                    onValueChange = actions.setPasswordInput,
+                    label = { Text(stringResource(R.string.pdf_password_label)) },
+                    placeholder = { Text(stringResource(R.string.pdf_password_hint)) },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "Toggle password"
+                            )
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                FilledTonalButton(
+                    onClick = actions.applyPassword,
+                    enabled = uiState.passwordInput.trim() != uiState.appliedPassword
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (uiState.passwordInput.isBlank()) "Clear" else "Lock")
+                }
+            }
+
+            Text(
+                text = "Page Numbers & Header / Footer",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PdfPageNumberStyle.entries.forEach { style ->
+                    FilterChip(
+                        selected = uiState.pageNumberStyle == style,
+                        onClick = { actions.setPageNumberStyle(style) },
+                        label = { Text(style.label, style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.testTag("export_page_num_${style.name.lowercase()}")
+                    )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = uiState.headerText,
+                    onValueChange = actions.setHeaderText,
+                    label = { Text("Header (Optional)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = uiState.footerText,
+                    onValueChange = actions.setFooterText,
+                    label = { Text("Footer (Optional)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (uiState.headerText.isNotBlank() || uiState.footerText.isNotBlank()) {
+                FilledTonalButton(
+                    onClick = actions.applyHeaderFooter,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Apply Header / Footer")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PdfInfosAndResultBar(
+    uiState: ExportUiState,
+    currentDocument: DocumentUiModel,
+    onOpen: (SavedItem) -> Unit,
+    onThumbnailClick: () -> Unit,
+    onSetupOcr: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        PdfInfoCard {
+            PdfInfos(uiState, currentDocument, onThumbnailClick, onSetupOcr)
+            SaveStatusBar(uiState, onOpen)
+        }
+        uiState.error?.let { ErrorBar(it) }
+    }
+}
+
+@Composable
+private fun PdfInfoCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(12.dp)
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun PdfInfos(
+    uiState: ExportUiState,
+    currentDocument: DocumentUiModel,
+    onThumbnailClick: () -> Unit,
+    onSetupOcr: () -> Unit,
+) {
+    val result = uiState.result
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        val thumbnail = currentDocument.thumbnail(0)
+        thumbnail?.let {
+            Card(
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier
+                    .padding(4.dp)
+                    .heightIn(max = THUMBNAIL_SIZE_DP.dp)
+                    .widthIn(max = THUMBNAIL_SIZE_DP.dp)
+            ) {
+                Image(
+                    bitmap = thumbnail.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.clickable { onThumbnailClick() }
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val pageCount = result?.pageCount ?: uiState.progress?.totalPages
+            pageCount?.let { count -> Text(text = pageCountText(count), fontWeight = FontWeight.SemiBold) }
+
+            if (uiState.isPasswordProtected) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "AES-128 Password Encrypted",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            uiState.ocrActivation?.let { activated ->
+                if (activated) {
+                    val langLabel = uiState.ocrLanguagesSummary.ifBlank { "OCR" }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = stringResource(R.string.export_searchable_pdf_active, langLabel),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = stringResource(R.string.export_searchable_pdf_setup),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(
+                            onClick = onSetupOcr,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            modifier = Modifier.testTag("export_setup_ocr_button")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.export_setup_ocr_action),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (uiState.blackAndWhiteAsJpeg) {
+                Text(
+                    stringResource(R.string.black_and_white_jpeg_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            if (uiState.isGenerating) {
+                Text(
+                    text = stringResource(R.string.creating_export),
+                    fontStyle = FontStyle.Italic,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                uiState.progress?.let { p ->
+                    if (p.totalPages <= 1) LinearProgressIndicator()
+                    else LinearProgressIndicator({ p.progress })
+                }
+            } else if (result != null) {
+                val context = LocalContext.current
+                val formattedFileSize = formatFileSize(result.sizeInBytes, context)
+                val sizeMessageKey =
+                    if (result.files.size == 1) R.string.file_size else R.string.file_size_total
+                Text(
+                    text = stringResource(sizeMessageKey, formattedFileSize),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaveStatusBar(uiState: ExportUiState, onOpen: (SavedItem) -> Unit) {
+    when {
+        uiState.isSaving -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            }
+        }
+        uiState.savedBundle != null -> SaveInfoBar(uiState.savedBundle, onOpen)
+    }
+}
+
+@Composable
+private fun FilenameTextField(filename: String, onFilenameChange: (String) -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    OutlinedTextField(
+        value = filename,
+        onValueChange = onFilenameChange,
+        label = { Text(stringResource(R.string.filename)) },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester),
+        trailingIcon = {
+            if (filename.isNotEmpty()) {
+                IconButton(onClick = {
+                    onFilenameChange("")
+                    focusRequester.requestFocus()
+                }) {
+                    Icon(Icons.Default.Clear, stringResource(R.string.clear_text))
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun MainActions(
+    onFilenameChange: (String) -> Unit,
+    uiState: ExportUiState,
+    onShare: () -> Unit,
+    onSave: () -> Unit,
+    onCloseScan: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ActionSurface {
+            FilenameTextField(uiState.filename, onFilenameChange)
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ExportButton(
+                    onClick = onShare,
+                    enabled = uiState.result != null,
+                    isPrimary = !uiState.hasSavedOrShared,
+                    icon = Icons.Default.Share,
+                    text = stringResource(R.string.share),
+                    modifier = Modifier.weight(1f)
+                )
+                ExportButton(
+                    onClick = onSave,
+                    enabled = uiState.result != null,
+                    isPrimary = !uiState.hasSavedOrShared,
+                    icon = Icons.Default.Download,
+                    text = stringResource(R.string.save),
+                    modifier = Modifier
+                        .weight(1f)
+                        .alpha(if (uiState.isSaving) 0.6f else 1f)
+                )
+            }
+        }
+        ExportButton(
+            icon = Icons.Default.Done,
+            text = stringResource(R.string.scan_new),
+            onClick = onCloseScan,
+            modifier = Modifier.fillMaxWidth(),
+            isPrimary = uiState.hasSavedOrShared,
+        )
+    }
+}
+
+@Composable
+private fun ActionSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        tonalElevation = 1.dp,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(12.dp)
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun ExportButton(
+    icon: ImageVector,
+    text: String,
+    isPrimary: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val containerColor by animateColorAsState(
+        targetValue = if (isPrimary) MaterialTheme.colorScheme.primary else Color.Transparent
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (isPrimary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (isPrimary) Color.Transparent else MaterialTheme.colorScheme.primary
+    )
+
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(containerColor = containerColor, contentColor = contentColor),
+        border = BorderStroke(1.dp, borderColor),
+        enabled = enabled,
+        modifier = modifier
+    ) {
+        Icon(icon, contentDescription = null)
+        Spacer(Modifier.width(4.dp))
+        Text(text)
+    }
+}
+
+@Composable
+private fun SaveInfoBar(savedBundle: SavedBundle, onOpen: (SavedItem) -> Unit) {
+    val dirName = savedBundle.saveDir?.name ?: stringResource(R.string.download_dirname)
+    val items = savedBundle.items
+    val nbFiles = items.size
+    val firstFileName = items[0].fileName
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = LocalContext.current.resources.getQuantityString(
+                        R.plurals.files_saved_to,
+                        nbFiles,
+                        nbFiles, firstFileName, dirName
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (nbFiles == 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    MainActionButton(
+                        onClick = { onOpen(items[0]) },
+                        text = stringResource(R.string.open),
+                        icon = Icons.AutoMirrored.Filled.OpenInNew,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorBar(error: ExportError) {
+    val (summary, details) = error.toDisplayText()
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(12.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.weight(1f)
+            )
+            if (details != null) {
+                IconButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Export error", "$summary\n\n$details"))
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = stringResource(R.string.copy_logs),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+        if (details != null) {
+            Text(
+                text = details,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportError.toDisplayText(): Pair<String, String?> {
+    return when (this) {
+        is ExportError.OnPrepareOrShare -> message to throwable.message
+        is ExportError.OnSave -> {
+            val summary = stringResource(messageRes)
+            val contextLines = buildErrorContextLines(saveDir)
+            val details = buildString {
+                if (contextLines.isNotEmpty()) append(contextLines.joinToString("\n"))
+                throwable?.message?.let {
+                    if (isNotEmpty()) append("\n\n")
+                    append(it)
+                }
+            }.ifEmpty { null }
+            summary to details
+        }
+    }
+}
+
+@Composable
+private fun buildErrorContextLines(saveDir: SaveDir?): List<String> {
+    val defaultDirName = stringResource(R.string.download_dirname)
+    val folderLine = when {
+        saveDir == null -> stringResource(R.string.error_context_folder, defaultDirName)
+        saveDir.name != null -> stringResource(R.string.error_context_folder, saveDir.name)
+        else -> null
+    }
+    val providerLine = saveDir?.uri?.authority
+        ?.let(::providerLabel)
+        ?.let { stringResource(R.string.error_context_provider, it) }
+    return listOfNotNull(folderLine, providerLine)
+}
+
+fun providerLabel(authority: String): String = when {
+    authority.contains("nextcloud", ignoreCase = true) -> "Nextcloud"
+    authority == "com.android.externalstorage.documents" -> "Local storage"
+    else -> authority
+}
+
+fun formatFileSize(sizeInBytes: Long?, context: Context): String {
+    return if (sizeInBytes == null) context.getString(R.string.unknown_size)
+    else Formatter.formatShortFileSize(context, sizeInBytes)
+}
+
+@Preview
+@Composable
+fun PreviewExportScreenAfterGeneration() {
+    val file = File("fake.pdf")
+    FairScanTheme {
+        ExportScreen(
+            uiState = ExportUiState(
+                result = ExportResult.Pdf(file, 442897L, 3),
+                ocrActivation = false,
+            ),
+            currentDocument = fakeDocument(
+                persistentListOf("gallica.bnf.fr-bpt6k5530456s-1"),
+                LocalContext.current
+            ),
+            navigation = dummyNavigation(),
+            exportActions = ExportActions(
+                prepareExportIfNeeded = {},
+                setFilename = {},
+                share = {},
+                save = {},
+                open = {},
+                cancelPreparationJob = {},
+            ),
+            onShare = {},
+            onSave = {},
+            onOpen = {},
+            onCloseScan = {},
+        )
+    }
+}

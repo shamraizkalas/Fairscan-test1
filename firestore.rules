@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             (!('lastSyncedAt' in data) || (data.lastSyncedAt is timestamp && data.lastSyncedAt <= request.time)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCloudFolder(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             data.colorHex is int &&
+             data.locked is bool &&
+             data.clientCreatedAtMs is int && data.clientCreatedAtMs >= 0 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCloudDocument(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+             (!('folderId' in data) || isValidId(data.folderId)) &&
+             (!('tags' in data) || (
+               data.tags is list &&
+               data.tags.size() <= 20 &&
+               (data.tags.size() == 0 || data.tags[0] is string)
+             )) &&
+             data.favorite is bool &&
+             data.locked is bool &&
+             data.pageCount is int && data.pageCount >= 0 && data.pageCount <= 2000 &&
+             data.lastExportFormat is string && data.lastExportFormat.size() >= 1 && data.lastExportFormat.size() <= 20 &&
+             data.clientCreatedAtMs is int && data.clientCreatedAtMs >= 0 &&
+             data.clientUpdatedAtMs is int && data.clientUpdatedAtMs >= 0 &&
+             (!('deletedAtMs' in data) || (data.deletedAtMs is int && data.deletedAtMs >= 0)) &&
+             (!('ocrText' in data) || (data.ocrText is string && data.ocrText.size() <= 25000)) &&
+             (!('aiSummary' in data) || (data.aiSummary is string && data.aiSummary.size() <= 4000)) &&
+             (!('coverThumbnailBase64' in data) || (data.coverThumbnailBase64 is string && data.coverThumbnailBase64.size() <= 250000)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'photoUrl', 'lastSyncedAt', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'lastSyncedAt', 'updatedAt']);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /folders/{folderId} {
+        allow get: if isOwner(userId) && isValidId(folderId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(folderId) &&
+                         incoming().keys().hasAll(['userId', 'name', 'colorHex', 'locked', 'clientCreatedAtMs', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'name', 'colorHex', 'locked', 'clientCreatedAtMs', 'createdAt', 'updatedAt']) &&
+                         isValidCloudFolder(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(folderId) &&
+                         isValidCloudFolder(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().clientCreatedAtMs == existing().clientCreatedAtMs &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'colorHex', 'locked', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(folderId);
+      }
+
+      match /documents/{docId} {
+        allow get: if isOwner(userId) && isValidId(docId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(docId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'favorite', 'locked', 'pageCount',
+                           'lastExportFormat', 'clientCreatedAtMs', 'clientUpdatedAtMs',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'folderId', 'tags', 'favorite', 'locked',
+                           'pageCount', 'lastExportFormat', 'clientCreatedAtMs', 'clientUpdatedAtMs',
+                           'deletedAtMs', 'ocrText', 'aiSummary', 'coverThumbnailBase64',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidCloudDocument(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(docId) &&
+                         isValidCloudDocument(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().clientCreatedAtMs == existing().clientCreatedAtMs &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'folderId', 'tags', 'favorite', 'locked', 'pageCount',
+                           'lastExportFormat', 'clientUpdatedAtMs', 'deletedAtMs',
+                           'ocrText', 'aiSummary', 'coverThumbnailBase64', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(docId);
+      }
+    }
+  }
+}

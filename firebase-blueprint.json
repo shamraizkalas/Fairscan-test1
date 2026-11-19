@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Signed-in Google user profile and sync metadata.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated Firebase UID matching the document path."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name from Google account."
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address (optional PII stored strictly under owner-only profile)."
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional Google profile avatar URL."
+        },
+        "lastSyncedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last completed library sync."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp submitted via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp submitted via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "displayName", "createdAt", "updatedAt"]
+    },
+    "CloudFolder": {
+      "title": "CloudFolder",
+      "description": "Synced document folder metadata.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "name": {
+          "type": "string",
+          "description": "Folder name (1-100 characters)."
+        },
+        "colorHex": {
+          "type": "integer",
+          "description": "ARGB color integer for folder badge."
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "Whether the folder requires local Vault PIN/biometric unlock."
+        },
+        "clientCreatedAtMs": {
+          "type": "integer",
+          "description": "Original device creation epoch timestamp in milliseconds."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp submitted via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp submitted via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "name", "colorHex", "locked", "clientCreatedAtMs", "createdAt", "updatedAt"]
+    },
+    "CloudDocument": {
+      "title": "CloudDocument",
+      "description": "Synced scanned document metadata, OCR text, AI summary, and compact cover thumbnail.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Document title (1-180 characters)."
+        },
+        "folderId": {
+          "type": "string",
+          "description": "Optional parent folder document ID."
+        },
+        "tags": {
+          "type": "array",
+          "description": "Up to 20 string tags associated with this document."
+        },
+        "favorite": {
+          "type": "boolean",
+          "description": "Whether the document is starred/favorited."
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "Whether document export or vault state is locked."
+        },
+        "pageCount": {
+          "type": "integer",
+          "description": "Number of pages in the document."
+        },
+        "lastExportFormat": {
+          "type": "string",
+          "description": "Most recent export format (e.g., PDF, JPEG)."
+        },
+        "clientCreatedAtMs": {
+          "type": "integer",
+          "description": "Original scan creation epoch time in milliseconds."
+        },
+        "clientUpdatedAtMs": {
+          "type": "integer",
+          "description": "Most recent local edit epoch time in milliseconds."
+        },
+        "deletedAtMs": {
+          "type": "integer",
+          "description": "Optional Recycle Bin soft-delete timestamp in milliseconds."
+        },
+        "ocrText": {
+          "type": "string",
+          "description": "Extracted OCR full-text index (up to 25,000 characters)."
+        },
+        "aiSummary": {
+          "type": "string",
+          "description": "Optional Gemini AI summary (up to 4,000 characters)."
+        },
+        "coverThumbnailBase64": {
+          "type": "string",
+          "description": "Compact base64-encoded JPEG cover preview (<= 250,000 chars)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp submitted via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp submitted via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "favorite",
+        "locked",
+        "pageCount",
+        "lastExportFormat",
+        "clientCreatedAtMs",
+        "clientUpdatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only Google user sync profile."
+    },
+    "/users/{userId}/folders/{folderId}": {
+      "schema": { "$ref": "#/entities/CloudFolder" },
+      "description": "Synced folder catalog owned by userId."
+    },
+    "/users/{userId}/documents/{docId}": {
+      "schema": { "$ref": "#/entities/CloudDocument" },
+      "description": "Synced scanned document metadata, OCR text, and compact preview owned by userId."
+    }
+  }
+}
